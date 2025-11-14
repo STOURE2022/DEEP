@@ -1,0 +1,93 @@
+# waxng_job.yml
+
+resources:
+  jobs:
+    waxng_job:
+      name: waxng_job
+      
+      parameters:
+        - name: zip_path
+          default: ""
+        - name: excel_path
+          default: ""
+        - name: extract_dir
+          default: ""
+        - name: log_exec_path
+          default: ""
+        - name: log_quality_path
+          default: ""
+      
+      # ==========================================
+      # DÉCLENCHEMENT AUTO
+      # ==========================================
+      trigger:
+        file_arrival:
+          url: /Volumes/abu_catalog/databricksassetbundletest/externalvolumetest/landing/zip
+          min_time_between_triggers_seconds: 20
+          wait_after_last_change_seconds: 60
+        pause_status: "UNPAUSED"
+      
+      tasks:
+        # ==========================================
+        # TASK 1 : DÉZIPAGE
+        # ==========================================
+        - task_key: unzip
+          description: "Extraction des fichiers ZIP"
+          environment_key: default
+          python_wheel_task:
+            package_name: waxng
+            entry_point: unzip_module
+        
+        # ==========================================
+        # TASK 2 : AUTO LOADER
+        # ==========================================
+        - task_key: auto-loader
+          depends_on:
+            - task_key: unzip
+          description: "Ingestion automatique avec Auto Loader"
+          environment_key: default
+          python_wheel_task:
+            package_name: waxng
+            entry_point: autoloader_module
+        
+        # ==========================================
+        # TASK 3 : INGESTION WAX
+        # ==========================================
+        - task_key: waxng-ingestion
+          depends_on:
+            - task_key: auto-loader
+          description: "validation, transformation et ingestion finale"
+          environment_key: default
+          python_wheel_task:
+            package_name: waxng
+            entry_point: main
+        
+        # ==========================================
+        # ✅ TASK 4 : TESTS BDD (NOUVEAU)
+        # ==========================================
+        - task_key: bdd-tests
+          depends_on:
+            - task_key: waxng-ingestion
+          description: "Tests BDD avec Behave pour valider le pipeline"
+          environment_key: default
+          python_wheel_task:
+            package_name: waxng
+            entry_point: run_bdd_tests
+          # ✅ Optionnel : Ne faire échouer le job que si les tests échouent
+          # run_if: ALL_SUCCESS  # Ne lance que si toutes les tâches précédentes réussissent
+      
+      # ==========================================
+      # ENVIRONNEMENT
+      # ==========================================
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - ../dist/*.whl  # Votre package waxng
+              # ✅ Ajouter behave pour les tests BDD
+            libraries:
+              - pypi:
+                  package: behave
+              - pypi:
+                  package: pytest  # Optionnel, pour assertions avancées
