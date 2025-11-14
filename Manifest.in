@@ -1,0 +1,12 @@
+# Inclure tous les fichiers features
+recursive-include features *.feature
+recursive-include features *.py
+
+# Inclure la documentation
+include README.md
+include LICENSE
+
+# Exclure les fichiers de build et cache
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
