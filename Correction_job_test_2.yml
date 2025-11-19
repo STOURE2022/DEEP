@@ -1,0 +1,193 @@
+# Jobs de TEST - Configuration SERVERLESS
+
+resources:
+  jobs:
+    # ==========================================
+    # JOB 1 : VALIDATION AVEC BASELINE
+    # ==========================================
+    waxng_test_validation:
+      name: waxng_test_validation
+      description: "Valide les résultats du pipeline en comparant avec une baseline"
+      
+      tags:
+        environment: "{{bundle.target}}"
+        project: waxng
+        type: validation-test
+      
+      parameters:
+        - name: dataset
+          default: "site"
+          description: "Dataset à valider (site, activite, clymene)"
+        
+        - name: pipeline_job_name
+          default: "waxng_job"
+          description: "Nom du job de pipeline à lancer"
+        
+        - name: excel_path
+          default: "/Volumes/abu_catalog/gdp_poc_dev/externalvolumetest/config/config.xlsx"
+          description: "Chemin Excel de configuration"
+        
+        - name: zip_path
+          default: "/Volumes/abu_catalog/gdp_poc_dev/externalvolumetest/landing/zip/"
+          description: "Chemin des fichiers ZIP de test"
+        
+        - name: tolerance_pct
+          default: "5"
+          description: "Tolérance en % pour la comparaison"
+      
+      tasks:
+        # ==========================================
+        # TASK 1 : Lancer le pipeline de production
+        # ==========================================
+        - task_key: run-pipeline
+          description: "Exécuter le pipeline WAX NG"
+          
+          notebook_task:
+            notebook_path: /Workspace/Repos/{{workspace.current_user.userName}}/waxng/notebooks/launch_pipeline
+            base_parameters:
+              pipeline_job_name: "{{job.parameters.pipeline_job_name}}"
+              dataset: "{{job.parameters.dataset}}"
+              excel_path: "{{job.parameters.excel_path}}"
+              zip_path: "{{job.parameters.zip_path}}"
+          
+          # ✅ Référencer l'environment (pas de cluster, pas de libraries)
+          environment_key: default
+        
+        # ==========================================
+        # TASK 2 : Comparer avec baseline
+        # ==========================================
+        - task_key: compare-with-baseline
+          depends_on:
+            - task_key: run-pipeline
+          description: "Comparer les résultats avec la baseline"
+          
+          notebook_task:
+            notebook_path: /Workspace/Repos/{{workspace.current_user.userName}}/waxng/notebooks/compare_with_baseline
+            base_parameters:
+              dataset: "{{job.parameters.dataset}}"
+              tolerance_pct: "{{job.parameters.tolerance_pct}}"
+          
+          # ✅ Référencer l'environment (serverless réutilise automatiquement)
+          environment_key: default
+        
+        # ==========================================
+        # TASK 3 : Générer le rapport
+        # ==========================================
+        - task_key: generate-report
+          depends_on:
+            - task_key: compare-with-baseline
+          description: "Générer le rapport de validation"
+          
+          notebook_task:
+            notebook_path: /Workspace/Repos/{{workspace.current_user.userName}}/waxng/notebooks/generate_test_report
+            base_parameters:
+              dataset: "{{job.parameters.dataset}}"
+          
+          # ✅ Référencer l'environment
+          environment_key: default
+      
+      max_concurrent_runs: 2
+      timeout_seconds: 7200
+      
+      # ✅ ENVIRONNEMENT SERVERLESS avec dépendances
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - ../dist/*.whl
+              - databricks-sdk
+      
+      email_notifications:
+        on_failure:
+          - data-team@company.com
+    
+    # ==========================================
+    # JOB 2 : TESTS BDD BEHAVE
+    # ==========================================
+    waxng_bdd_tests:
+      name: waxng_bdd_tests
+      description: "Tests BDD avec Behave pour valider les scénarios"
+      
+      tags:
+        environment: "{{bundle.target}}"
+        project: waxng
+        type: bdd-tests
+      
+      parameters:
+        - name: test_tags
+          default: "integration"
+          description: "Tags Behave à exécuter"
+        
+        - name: test_feature
+          default: "all"
+          description: "Feature spécifique ou 'all'"
+      
+      tasks:
+        - task_key: run-bdd-tests
+          description: "Exécuter les tests BDD avec Behave"
+          
+          notebook_task:
+            notebook_path: /Workspace/Repos/{{workspace.current_user.userName}}/waxng/notebooks/run_bdd_tests
+            base_parameters:
+              test_tags: "{{job.parameters.test_tags}}"
+              test_feature: "{{job.parameters.test_feature}}"
+          
+          # ✅ Référencer l'environment
+          environment_key: default
+      
+      max_concurrent_runs: 3
+      timeout_seconds: 3600
+      
+      # ✅ ENVIRONNEMENT SERVERLESS avec dépendances
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - ../dist/*.whl
+              - behave>=1.2.6
+              - pytest>=7.0.0
+    
+    # ==========================================
+    # JOB 3 : ORCHESTRATEUR E2E (optionnel)
+    # ==========================================
+    waxng_e2e_orchestrator:
+      name: waxng_e2e_orchestrator
+      description: "Orchestrateur E2E - Lance plusieurs datasets et valide"
+      
+      tags:
+        environment: "{{bundle.target}}"
+        project: waxng
+        type: e2e-orchestrator
+      
+      parameters:
+        - name: datasets
+          default: "site,activite,clymene"
+          description: "Liste des datasets séparés par virgules"
+      
+      tasks:
+        - task_key: orchestrate-tests
+          description: "Orchestrer les tests sur plusieurs datasets"
+          
+          notebook_task:
+            notebook_path: /Workspace/Repos/{{workspace.current_user.userName}}/waxng/notebooks/orchestrator/e2e_orchestrator
+            base_parameters:
+              datasets: "{{job.parameters.datasets}}"
+          
+          environment_key: default
+      
+      max_concurrent_runs: 1
+      timeout_seconds: 10800
+      
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - ../dist/*.whl
+              - databricks-sdk
+      
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "Europe/Paris"
